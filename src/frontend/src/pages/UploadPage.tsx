@@ -7,6 +7,33 @@ import { Progress } from "@/components/ui/progress"
 import { Alert } from "@/components/ui/alert"
 import { formatBytes } from "@/lib/utils"
 
+const CHUNK = 5 * 1024 * 1024
+const MAX_RETRIES = 3
+
+async function uploadChunk(file: File, index: number, total: number, transferId: string, fileId: string) {
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const chunk = file.slice(index * CHUNK, (index + 1) * CHUNK)
+      const fd = new FormData()
+      fd.append("chunk", chunk)
+      fd.append("index", String(index))
+      fd.append("total", String(total))
+      fd.append("filename", file.name)
+      fd.append("fileId", fileId)
+      fd.append("transferId", transferId)
+      const r = await fetch("/api/upload/chunk", { method: "POST", body: fd, credentials: "include" })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.error || `Chunk ${index + 1} failed`)
+      return data
+    } catch (error: any) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (attempt < MAX_RETRIES) await new Promise(resolve => setTimeout(resolve, 500 * attempt))
+    }
+  }
+  throw lastError || new Error(`Chunk ${index + 1} failed`)
+}
+
 export function UploadPage({ onComplete }: { onComplete?: (link:string)=>void }) {
   const [files, setFiles] = useState<File[]>([])
   const [settings, setSettings] = useState<any>({ expiryDays: 7 })
@@ -19,34 +46,42 @@ export function UploadPage({ onComplete }: { onComplete?: (link:string)=>void })
     if (!files.length) return
     setUploading(true); setError(""); setProgress(5)
     try {
-      // 1. Create transfer
       const res = await fetch("/api/transfers", { method: "POST", headers: { "Content-Type":"application/json" }, credentials: "include", body: JSON.stringify({ files: files.map(f=>({name:f.name,size:f.size,type:f.type})), ...settings }) })
-      if (!res.ok) throw new Error("Failed to create transfer")
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to create transfer")
+      if (!Array.isArray(data.files) || data.files.length !== files.length) throw new Error("Upload session did not return file IDs")
+
       const transferId = data.transferId
       setProgress(15)
-      // 2. Chunked upload each file
       let completed = 0
-      for (const file of files) {
-        const CHUNK = 5*1024*1024
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        const file = files[fileIndex]
+        const fileMeta = data.files[fileIndex]
         const total = Math.ceil(file.size / CHUNK)
-        for (let i=0;i<total;i++) {
-          const chunk = file.slice(i*CHUNK, (i+1)*CHUNK)
-          const fd = new FormData()
-          fd.append("chunk", chunk); fd.append("index", String(i)); fd.append("total", String(total)); fd.append("filename", file.name); fd.append("transferId", transferId)
-          const r = await fetch("/api/upload/chunk", { method: "POST", body: fd, credentials: "include" })
-          if (!r.ok) throw new Error("Chunk failed for "+file.name)
+
+        // Recover parts already accepted by the Worker before a retry/reload of the upload loop.
+        let uploadedParts = new Set<number>()
+        try {
+          const status = await fetch(`/api/upload/status/${transferId}/${fileMeta.id}`, { credentials: "include" })
+          if (status.ok) {
+            const statusData = await status.json()
+            uploadedParts = new Set<number>((statusData.uploadedParts || []).map((n: number) => n - 1))
+          }
+        } catch { /* upload itself remains authoritative */ }
+
+        for (let i = 0; i < total; i++) {
+          if (!uploadedParts.has(i)) await uploadChunk(file, i, total, transferId, fileMeta.id)
           setProgress(15 + (completed + (i+1)/total)/files.length*70)
         }
         completed++
       }
-      // 3. Finalize
+
       const fin = await fetch(`/api/transfers/${transferId}/finalize`, { method: "POST", credentials: "include" })
-      if (!fin.ok) throw new Error("Finalize failed")
-      const finData = await fin.json()
+      const finData = await fin.json().catch(() => ({}))
+      if (!fin.ok) throw new Error(finData.error || "Finalize failed")
       setProgress(100); setResult({ link: finData.downloadUrl, token: finData.token })
       if (onComplete) onComplete(finData.downloadUrl)
-    } catch (e:any) { setError(e.message) } finally { setUploading(false) }
+    } catch (e:any) { setError(e.message || "Upload failed") } finally { setUploading(false) }
   }
 
   if (result) {
@@ -77,7 +112,7 @@ export function UploadPage({ onComplete }: { onComplete?: (link:string)=>void })
       </div>
       <div className="space-y-6">
         <TransferSettings onChange={setSettings} />
-        <Card><CardContent className="p-4 text-xs text-muted-foreground space-y-2"><p><strong>How it works:</strong></p><p>1. Chunked upload (5MB) → R2</p><p>2. Secure token: crypto.randomBytes + nanoid (never sequential IDs)</p><p>3. Link: /d/:token</p><p>4. Auto-delete via Cron</p></CardContent></Card>
+        <Card><CardContent className="p-4 text-xs text-muted-foreground space-y-2"><p><strong>How it works:</strong></p><p>1. Resumable multipart upload (5 MiB parts) → R2</p><p>2. Secure token: cryptographic random IDs</p><p>3. Link: /d/:token</p><p>4. Auto-delete via Cron</p></CardContent></Card>
       </div>
     </div>
   )
