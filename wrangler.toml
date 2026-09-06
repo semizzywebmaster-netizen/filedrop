@@ -1,8 +1,7 @@
 name = "filedrop"
 main = "src/worker/index.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-09-06"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "src/frontend/dist"
 
 [vars]
 ENVIRONMENT = "production"
@@ -12,6 +11,8 @@ MAX_FILES_PER_TRANSFER = "50"
 DEFAULT_EXPIRY_DAYS = "7"
 GUEST_EXPIRY_DAYS = "3"
 TURNSTILE_ENABLED = "true"
+RATE_LIMIT_UPLOADS_PER_HOUR = "20"
+RATE_LIMIT_DOWNLOADS_PER_HOUR = "100"
 
 [[d1_databases]]
 binding = "DB"
@@ -39,6 +40,5 @@ not_found_handling = "single-page-application"
 [build]
 command = "npm run build"
 
-# Development bindings (overridden via wrangler.jsonc or .dev.vars)
 [dev]
 port = 8787
