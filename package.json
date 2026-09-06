@@ -13,7 +13,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply filedrop-db --local && wrangler d1 migrations apply filedrop-db --remote",
     "deploy": "wrangler deploy",
-    "deploy:pages": "wrangler pages deploy src/frontend/dist",
     "dev": "wrangler dev --local --persist-to=.wrangler/state",
     "dev:frontend": "vite --config src/frontend/vite.config.ts",
     "lint": "eslint . --ext .ts,.tsx",
@@ -26,7 +25,7 @@
     "fflate": "^0.8.2",
     "hono": "^4.6.0",
     "jose": "^5.9.0",
-    "nanoid": "^5.0.8",
+    "nanoid": "^5.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -44,6 +43,6 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.8",
     "vitest": "^2.1.1",
-    "wrangler": "^3.80.0"
+    "wrangler": "^4.129.0"
   }
 }
