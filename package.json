@@ -1,0 +1,48 @@
+{
+  "name": "filedrop",
+  "version": "1.0.0",
+  "description": "FileDrop \u2014 Professional Cloud File Transfer Platform. Cloudflare-first.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:worker",
+    "build:frontend": "vite build --config src/frontend/vite.config.ts",
+    "build:worker": "tsc -p tsconfig.worker.json",
+    "cf:typegen": "wrangler types",
+    "db:create": "wrangler d1 create filedrop-db",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply filedrop-db --local && wrangler d1 migrations apply filedrop-db --remote",
+    "deploy": "wrangler deploy",
+    "deploy:pages": "wrangler pages deploy src/frontend/dist",
+    "dev": "wrangler dev --local --persist-to=.wrangler/state",
+    "dev:frontend": "vite --config src/frontend/vite.config.ts",
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^0.34.0",
+    "hono": "^4.6.0",
+    "jose": "^5.9.0",
+    "nanoid": "^5.0.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240925.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.25.0",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.1",
+    "wrangler": "^3.80.0"
+  }
+}
