@@ -10,9 +10,11 @@ MAX_FILE_SIZE_MB = "2048"
 MAX_FILES_PER_TRANSFER = "50"
 DEFAULT_EXPIRY_DAYS = "7"
 GUEST_EXPIRY_DAYS = "3"
-TURNSTILE_ENABLED = "true"
 RATE_LIMIT_UPLOADS_PER_HOUR = "20"
 RATE_LIMIT_DOWNLOADS_PER_HOUR = "100"
+
+[secrets]
+required = ["JWT_SECRET", "CRON_SECRET"]
 
 [[d1_databases]]
 binding = "DB"
@@ -36,6 +38,7 @@ enabled = true
 [assets]
 directory = "src/frontend/dist"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
 
 [build]
 command = "npm run build"
