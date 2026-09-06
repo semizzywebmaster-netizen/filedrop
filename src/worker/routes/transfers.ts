@@ -21,6 +21,11 @@ export async function hasTransferOwner(c: any, transfer: any) {
   return !!transfer.guest_token && readCookie(c.req.raw as Request, `fd_guest_${transfer.id}`) === transfer.guest_token
 }
 
+async function getUploadFiles(db: D1Database, transferId: string) {
+  const rows = await db.prepare("SELECT id, original_name as filename, size, mime_type as mimeType, status FROM transfer_files WHERE transfer_id = ? ORDER BY created_at ASC").bind(transferId).all()
+  return rows.results || []
+}
+
 transferRoutes.post("/", async (c) => {
   const db = c.env.DB as D1Database
   const ip = c.req.header("cf-connecting-ip") || "unknown"
@@ -30,8 +35,8 @@ transferRoutes.post("/", async (c) => {
   const body = await c.req.json()
   const { files, expiryDays, password, maxDownloads, emailTo, message, title } = body
   if (!files || !Array.isArray(files) || files.length === 0) return c.json({ error: "No files" }, 400)
-  if (files.length > 50) return c.json({ error: "Max 50 files" }, 400)
-  if (files.some((f: any) => !f?.name || typeof f.size !== "number" || f.size < 0)) return c.json({ error: "Invalid file metadata" }, 400)
+  if (files.length > Number(c.env.MAX_FILES_PER_TRANSFER || 50)) return c.json({ error: `Max ${c.env.MAX_FILES_PER_TRANSFER || 50} files` }, 400)
+  if (files.some((f: any) => !f?.name || typeof f.size !== "number" || !Number.isSafeInteger(f.size) || f.size < 0)) return c.json({ error: "Invalid file metadata" }, 400)
 
   const maxBytes = Math.max(1, parseInt(c.env.MAX_FILE_SIZE_MB || "2048")) * 1024 * 1024
   const totalSize = files.reduce((a: number, b: any) => a + (b.size || 0), 0)
@@ -40,7 +45,7 @@ transferRoutes.post("/", async (c) => {
 
   const user = await getAuthUser(c.req.raw as Request, c.env)
   const now = Math.floor(Date.now() / 1000)
-  const expDays = Math.min(30, Math.max(1, parseInt(expiryDays) || 7))
+  const expDays = Math.min(30, Math.max(1, parseInt(expiryDays) || Number(c.env.DEFAULT_EXPIRY_DAYS || 7)))
   const expiresAt = now + expDays * 86400
   const id = crypto.randomUUID()
   const token = shortSecureToken() + secureToken(8)
@@ -50,13 +55,13 @@ transferRoutes.post("/", async (c) => {
 
   await db.prepare("INSERT INTO transfers (id, token, owner_id, guest_token, title, message, password_hash, status, expiry_days, expires_at, max_downloads, total_size, files_count, email_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, token, user?.id || null, guestToken, title || null, message || null, pwHash, expDays, expiresAt, maxDownloads || null, totalSize, files.length, emailTo || null, now, now).run()
 
-  const createdFiles: Array<{ id: string; name: string; size: number; type: string }> = []
+  const createdFiles: any[] = []
   for (const f of files) {
     const fid = crypto.randomUUID()
-    const safeName = String(f.name).replace(/[\\/]/g, "_").slice(0, 255)
+    const safeName = String(f.name).replace(/[\\/]/g, "_").replace(/[\u0000-\u001f\u007f]/g, "_").slice(0, 255) || "file"
     const r2Key = `transfers/${id}/${fid}-${safeName}`
-    await db.prepare("INSERT INTO transfer_files (id, transfer_id, filename, original_name, size, mime_type, r2_key, chunk_total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)").bind(fid, id, safeName, safeName, f.size, f.type || "application/octet-stream", r2Key, 1, now).run()
-    createdFiles.push({ id: fid, name: safeName, size: f.size, type: f.type || "application/octet-stream" })
+    await db.prepare("INSERT INTO transfer_files (id, transfer_id, filename, original_name, size, mime_type, r2_key, chunk_total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)").bind(fid, id, safeName, safeName, f.size, f.type || "application/octet-stream", r2Key, Math.max(1, Math.ceil(f.size / (5 * 1024 * 1024))), now).run()
+    createdFiles.push({ id: fid, filename: safeName, size: f.size, mimeType: f.type || "application/octet-stream" })
   }
 
   if (guestToken) c.header("Set-Cookie", `fd_guest_${id}=${encodeURIComponent(guestToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${expDays * 86400}`)
@@ -87,7 +92,7 @@ transferRoutes.get("/t/:token", async (c) => {
     if (unlock) {
       try {
         const payload = await verifyJWT(unlock, c.env.JWT_SECRET)
-        unlocked = (payload as any).purpose === "transfer_unlock" && (payload as any).token === token && (payload as any).transferId === transfer.id
+        unlocked = (payload as any).purpose === "transfer_unlock" && (payload as any).token === token
       } catch { unlocked = false }
     }
   } else unlocked = true
