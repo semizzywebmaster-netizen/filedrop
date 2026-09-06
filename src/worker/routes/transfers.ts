@@ -15,7 +15,7 @@ function readCookie(req: Request, name: string) {
 
 function unlockCookieName(token: string) { return `fd_unlock_${token}` }
 
-async function hasTransferOwner(c: any, transfer: any) {
+export async function hasTransferOwner(c: any, transfer: any) {
   const user = await getAuthUser(c.req.raw as Request, c.env)
   if (user && transfer.owner_id === user.id) return true
   return !!transfer.guest_token && readCookie(c.req.raw as Request, `fd_guest_${transfer.id}`) === transfer.guest_token
@@ -50,15 +50,17 @@ transferRoutes.post("/", async (c) => {
 
   await db.prepare("INSERT INTO transfers (id, token, owner_id, guest_token, title, message, password_hash, status, expiry_days, expires_at, max_downloads, total_size, files_count, email_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, token, user?.id || null, guestToken, title || null, message || null, pwHash, expDays, expiresAt, maxDownloads || null, totalSize, files.length, emailTo || null, now, now).run()
 
+  const createdFiles: Array<{ id: string; name: string; size: number; type: string }> = []
   for (const f of files) {
     const fid = crypto.randomUUID()
     const safeName = String(f.name).replace(/[\\/]/g, "_").slice(0, 255)
     const r2Key = `transfers/${id}/${fid}-${safeName}`
     await db.prepare("INSERT INTO transfer_files (id, transfer_id, filename, original_name, size, mime_type, r2_key, chunk_total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)").bind(fid, id, safeName, safeName, f.size, f.type || "application/octet-stream", r2Key, 1, now).run()
+    createdFiles.push({ id: fid, name: safeName, size: f.size, type: f.type || "application/octet-stream" })
   }
 
   if (guestToken) c.header("Set-Cookie", `fd_guest_${id}=${encodeURIComponent(guestToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${expDays * 86400}`)
-  return c.json({ transferId: id, token, expiresAt })
+  return c.json({ transferId: id, token, expiresAt, files: createdFiles })
 })
 
 transferRoutes.get("/", async (c) => {
@@ -85,7 +87,7 @@ transferRoutes.get("/t/:token", async (c) => {
     if (unlock) {
       try {
         const payload = await verifyJWT(unlock, c.env.JWT_SECRET)
-        unlocked = (payload as any).purpose === "transfer_unlock" && (payload as any).token === token
+        unlocked = (payload as any).purpose === "transfer_unlock" && (payload as any).token === token && (payload as any).transferId === transfer.id
       } catch { unlocked = false }
     }
   } else unlocked = true
