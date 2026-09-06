@@ -53,9 +53,9 @@ export async function handleCron(env: any) {
 }
 
 cronRoutes.get("/cleanup", async (c) => {
-  const secret = c.req.query("secret")
   const configuredSecret = String(c.env.CRON_SECRET || "").trim()
-  if (!configuredSecret || secret !== configuredSecret) return c.text("Unauthorized", 401)
+  const providedSecret = String(c.req.header("X-Cron-Secret") || "").trim()
+  if (!configuredSecret || !providedSecret || providedSecret !== configuredSecret) return c.text("Unauthorized", 401)
   const result = await handleCron(c.env)
   return c.json(result)
 })
